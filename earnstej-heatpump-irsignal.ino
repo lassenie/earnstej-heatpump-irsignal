@@ -1,4 +1,5 @@
-// HeatPumpIRSignal
+// earnstej-heatpump-irsignal
+// Copyright (c) 2020 Lasse Nielsen
 // Controlling a heat pump via IR (e.g. TSAL6400 LED). 
 
 #include <avr/wdt.h>
