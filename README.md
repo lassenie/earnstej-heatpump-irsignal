@@ -15,10 +15,10 @@ Varmepumpen kan enten være:
 Inputs:
 
 * Varmesignal, 3 stk. - hvis et af dem er lavt (0 Volt), tændes varmepumpen. Svævende indgange betragtes som høje (5 Volt via interne pull up-modstande). Varmesignaler kan f.eks. være:
-** Tænd-knap som brugere kan aktivere for at få varme tændt.
-** Automatisk signal, f.eks. fra timer der aktiverer et relæ som kobler indgang til Vcc (5 Volt).
+  * Tænd-knap som brugere kan aktivere for at få varme tændt.
+  * Automatisk signal, f.eks. fra timer der aktiverer et relæ som kobler indgang til Vcc (5 Volt).
 * Frost-signal - hvis dette er lavt (0 Volt), køres sænket temperature i stedet for at slukke varmepumpen når der ikke er varmesignal. Svævende indgang betragtes som høj (5 Volt via intern pull up-modstand). Frost-signal kan f.eks. være:
-** Knap som stilles til mildt vejr eller frostvejr.
+  * Knap som stilles til mildt vejr eller frostvejr.
 * Opdateringssignal - hvis dette momentant - dvs. i 1 sekund - er lavt (0 Volt), sendes et ekstra IR-signal til varmepumpen (kan evt. bruges hvis IR-pumpen er blevet påvirket med fjernbetjening eller af anden årsag kører anderledes end forventet). Svævende indgang betragtes som høj (5 Volt via intern pull up-modstand). Dette signal bruges ikke nødvendigvis.
 
 Outputs:
