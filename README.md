@@ -4,6 +4,9 @@ Dette program bruges til at styre en varmepumpe i E Arnstej. Den er lavet til at
 
 Via IR kan en Panasonic NKE-model eller lignende styres. Dertil kan en TSAL6400 IR-diode eller tilsvarende bruges.
 
+Krævede kodebiblioteker:
+* https://github.com/ToniA/arduino-heatpumpir
+
 ## Funktion
 
 Varmepumpen kan enten være:
