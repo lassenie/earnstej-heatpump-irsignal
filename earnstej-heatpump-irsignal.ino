@@ -23,7 +23,7 @@
 #define UPDATE_INTERVAL_MSEC      200
 #define STEADY_INPUT_STATE_MSEC  1000UL
 #define BOOT_DELAY_SECONDS         10 // Must be at least 2 seconds because of watchdog disabling during startup
-#define REBOOT_INTERVAL_MSEC     (20 * 1000) // 700000000 // A little more than a week
+#define REBOOT_INTERVAL_MSEC     700000000UL // A little more than a week
 
 HeatpumpIR *pHeatpumpIR = new PanasonicNKEHeatpumpIR(); // NKE model has 8/10 degrees maintenance with max. fan speed //PanasonicDKEHeatpumpIR();
 
@@ -37,6 +37,8 @@ int updateInputState = -1;
 
 void setup()
 {
+  wdt_disable();  /* Disable the watchdog and wait for more than 2 seconds so that the Arduino doesn't keep resetting infinitely in case of wrong configuration */
+
   Serial.begin(9600);
   Serial.println(F("setup()"));
 
@@ -51,8 +53,6 @@ void setup()
   pinMode(LED_OUTPUT_PIN,           OUTPUT);        
   digitalWrite(LED_OUTPUT_PIN,      LOW);
   digitalWrite(TEMP_SELECT_OUT_PIN, LOW);
-
-  wdt_disable();  /* Disable the watchdog and wait for more than 2 seconds so that the Arduino doesn't keep resetting infinitely in case of wrong configuration */
 
   // Because the heat pump may be booting up at the same time,
   // delay the inital IR signalling so allow it to get ready.
