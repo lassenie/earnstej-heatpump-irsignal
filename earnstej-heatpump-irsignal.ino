@@ -12,7 +12,7 @@
 #define HEAT_INPUT_PIN3         9
 #define LED_OUTPUT_PIN          13
 
-#define TEMPERATURE_SETPOINT       25
+#define TEMPERATURE_SETPOINT       23
 #define UPDATE_INTERVAL_MSEC      200
 #define STEADY_INPUT_STATE_MSEC  1000UL
 #define BOOT_DELAY_SECONDS         10
