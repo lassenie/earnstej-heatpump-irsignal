@@ -6,6 +6,7 @@
 #include <PanasonicHeatpumpIR.h> // HeatPumpIR library by Toni Arte (https://github.com/ToniA/arduino-heatpumpir) - last tested with version 1.0.15
 
 #define IR_SENDER_PIN           3 // PWM pin
+#define EXT_LED_OUTPUT_PIN      4
 #define FORCE_UPDATE_INPUT_PIN  5
 #define FROST_INPUT_PIN         6
 #define HEAT_INPUT_PIN1         7
@@ -14,16 +15,17 @@
 #define TEMP_SELECT_OUT_PIN     10
 #define TEMP_SELECT_IN1_PIN     11
 #define TEMP_SELECT_IN2_PIN     12
-#define LED_OUTPUT_PIN          13
+#define INT_LED_OUTPUT_PIN      13
 
 #define TEMPERATURE_SETPOINT_0     22 // Pins not wired
 #define TEMPERATURE_SETPOINT_1     23 // TEMP_SELECT_OUT_PIN wired to TEMP_SELECT_IN1_PIN
 #define TEMPERATURE_SETPOINT_2     24 // TEMP_SELECT_OUT_PIN wired to TEMP_SELECT_IN2_PIN
 #define TEMPERATURE_SETPOINT_3     25 // TEMP_SELECT_OUT_PIN wired to TEMP_SELECT_IN1_PIN+TEMP_SELECT_IN2_PIN
 #define UPDATE_INTERVAL_MSEC      200
+#define IR_SIGNAL_PAUSE_BLINKS      3 // x 2 x UPDATE_INTERVAL_MSEC = pause duration
 #define STEADY_INPUT_STATE_MSEC  1000UL
 #define BOOT_DELAY_SECONDS         10 // Must be at least 2 seconds because of watchdog disabling during startup
-#define REBOOT_INTERVAL_MSEC     700000000UL // A little more than a week
+//#define REBOOT_INTERVAL_MSEC     700000000UL // A little more than a week
 
 HeatpumpIR *pHeatpumpIR = new PanasonicNKEHeatpumpIR(); // NKE model has 8/10 degrees maintenance with max. fan speed //PanasonicDKEHeatpumpIR();
 
@@ -50,17 +52,21 @@ void setup()
   pinMode(TEMP_SELECT_OUT_PIN,      OUTPUT);
   pinMode(TEMP_SELECT_IN1_PIN,      INPUT_PULLUP);
   pinMode(TEMP_SELECT_IN2_PIN,      INPUT_PULLUP);
-  pinMode(LED_OUTPUT_PIN,           OUTPUT);        
-  digitalWrite(LED_OUTPUT_PIN,      LOW);
+  pinMode(INT_LED_OUTPUT_PIN,       OUTPUT);        
+  pinMode(EXT_LED_OUTPUT_PIN,       OUTPUT);        
+  digitalWrite(INT_LED_OUTPUT_PIN,  LOW);
+  digitalWrite(EXT_LED_OUTPUT_PIN,  LOW);
   digitalWrite(TEMP_SELECT_OUT_PIN, LOW);
 
   // Because the heat pump may be booting up at the same time,
   // delay the inital IR signalling so allow it to get ready.
   for (int i = 0; i < BOOT_DELAY_SECONDS; ++i)
   {
-    digitalWrite(LED_OUTPUT_PIN, HIGH);
+    digitalWrite(INT_LED_OUTPUT_PIN, HIGH);
+    digitalWrite(EXT_LED_OUTPUT_PIN, HIGH);
     delay(500);
-    digitalWrite(LED_OUTPUT_PIN, LOW);
+    digitalWrite(INT_LED_OUTPUT_PIN, LOW);
+    digitalWrite(EXT_LED_OUTPUT_PIN, LOW);
     delay(500);
   }
 
@@ -73,12 +79,12 @@ void loop()
 
   delay(UPDATE_INTERVAL_MSEC);
 
-  // Time to reboot at reqular interval?
-  if (millis() > REBOOT_INTERVAL_MSEC)
-  {
-    // Let the watchdog do the rebooting
-    while (true);
-  }
+//  // Time to reboot at reqular interval?
+//  if (millis() > REBOOT_INTERVAL_MSEC)
+//  {
+//    // Let the watchdog do the rebooting
+//    while (true);
+//  }
   
   if (checkUpdatedInputs())
     updateIR();
@@ -97,7 +103,8 @@ bool checkUpdatedInputs()
   {
     lastStateChangeTick = millis();
 
-    digitalWrite(LED_OUTPUT_PIN, HIGH);
+    digitalWrite(INT_LED_OUTPUT_PIN, HIGH);
+    digitalWrite(EXT_LED_OUTPUT_PIN, HIGH);
 
     // Don't use the tick value 0 - reserved
     if (lastStateChangeTick == 0)
@@ -114,6 +121,9 @@ bool checkUpdatedInputs()
     // Still waiting for steadiness
     if (lastStateChangeTick != 0)
     {
+      // Blink external LED by toggling state at each update
+      digitalWrite(EXT_LED_OUTPUT_PIN, (digitalRead(EXT_LED_OUTPUT_PIN) == LOW) ? HIGH : LOW);
+      
       if (millis() - lastStateChangeTick >= STEADY_INPUT_STATE_MSEC)
       {
         lastStateChangeTick = 0;
@@ -129,19 +139,43 @@ void updateIR()
 {
   Serial.println(F("updateIR()"));
 
-  byte power = (heatInputState == LOW) || (frostInputState == LOW) ? POWER_ON : POWER_OFF;
-  byte temp  = (heatInputState == LOW) ? getTemperatureSetpoint() : ((frostInputState == LOW) ? 8 : 0);
+  byte power = (isHeating() || isAntifrost()) ? POWER_ON : POWER_OFF;
+  byte temp  = isHeating() ? getTemperatureSetpoint() : (isAntifrost() ? 8 : 0);
 
   Serial.print(F("Power: ")); Serial.println(power);
   Serial.print(F("Temp: ")); Serial.println(temp);
 
   pHeatpumpIR->send(irSender, power, MODE_HEAT, FAN_AUTO, temp, VDIR_UP, HDIR_AUTO);
-  delay(1000);
+  pauseIRWhileBlinkingExtLED();
   pHeatpumpIR->send(irSender, power, MODE_HEAT, FAN_AUTO, temp, VDIR_UP, HDIR_AUTO);
-  delay(1000);
+  pauseIRWhileBlinkingExtLED();
   pHeatpumpIR->send(irSender, power, MODE_HEAT, FAN_AUTO, temp, VDIR_UP, HDIR_AUTO);
 
-  digitalWrite(LED_OUTPUT_PIN, LOW);
+  digitalWrite(INT_LED_OUTPUT_PIN, LOW);
+
+  // Keep external LED on while heating
+  digitalWrite(EXT_LED_OUTPUT_PIN, isHeating() ? HIGH : LOW);
+}
+
+void pauseIRWhileBlinkingExtLED()
+{
+  for (byte i = 0; i < IR_SIGNAL_PAUSE_BLINKS * 2 ; ++i)
+  {
+    // Blink external LED by toggling state at each update
+    digitalWrite(EXT_LED_OUTPUT_PIN, (digitalRead(EXT_LED_OUTPUT_PIN) == LOW) ? HIGH : LOW);
+
+    delay(UPDATE_INTERVAL_MSEC);
+  }  
+}
+
+bool isHeating()
+{
+  return (heatInputState == LOW);
+}
+
+bool isAntifrost()
+{
+  return (frostInputState == LOW);
 }
 
 byte getTemperatureSetpoint()
