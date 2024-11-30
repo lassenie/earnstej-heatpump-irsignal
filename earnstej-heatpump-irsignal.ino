@@ -7,43 +7,28 @@
 
 #define IR_SENDER_PIN            3 // PWM pin
 #define EXT_LED_OUTPUT_PIN       4
-#define FORCE_UPDATE_INPUT_PIN   5
 #define VERTICAL_DIR_INPUT_PIN   6
-#define HEAT_TOGGLE_IN1_PIN      7
-#define HEAT_TOGGLE_IN2_PIN      8
-#define HEAT_TOGGLE_IN3_PIN      9
-#define TEMP_SELECT_OUT_PIN     10
-#define TEMP_SELECT_IN1_PIN     11
-#define TEMP_SELECT_IN2_PIN     12
+#define HEAT_TOGGLE_IN_PIN       7
 #define INT_LED_OUTPUT_PIN      13
 
-#define TEMPERATURE_SETPOINT_0     22 // Pins not wired
-#define TEMPERATURE_SETPOINT_1     23 // TEMP_SELECT_OUT_PIN wired to TEMP_SELECT_IN1_PIN
-#define TEMPERATURE_SETPOINT_2     24 // TEMP_SELECT_OUT_PIN wired to TEMP_SELECT_IN2_PIN
-#define TEMPERATURE_SETPOINT_3     25 // TEMP_SELECT_OUT_PIN wired to TEMP_SELECT_IN1_PIN+TEMP_SELECT_IN2_PIN
-#define UPDATE_INTERVAL_MSEC      200
-#define IR_SIGNAL_PAUSE_BLINKS      3 // x 2 x UPDATE_INTERVAL_MSEC = pause duration
-#define STEADY_INPUT_STATE_MSEC  100UL // Must be short enough to allow a user briefly pressing a button, but long enough to handle debounching
-#define BOOT_DELAY_SECONDS         10 // Must be at least 2 seconds because of watchdog disabling during startup
-//#define REBOOT_INTERVAL_MSEC     700000000UL // A little more than a week
+#define TEMPERATURE_SETPOINT        23
+#define UPDATE_INTERVAL_MSEC      20UL
+#define IR_SIGNAL_PAUSE_BLINKS       3
+#define STEADY_INPUT_STATE_MSEC  100UL // Must be long enough to handle debounching
+#define BOOT_DELAY_SECONDS          10 // Must be at least 2 seconds because of watchdog disabling during startup
 
-#define HEAT_TIME_MILLIS_1  (12 * 60 * 60 * 1000) // 12 hours - enough for a meeting
-#define HEAT_TIME_MILLIS_2  (24 * 60 * 60 * 1000) // 24 hours - enough for a one-day event
-#define HEAT_TIME_MILLIS_3  (72 * 60 * 60 * 1000) // 72 hours - enough for a weekend
-
-#define HEAT_MILLIS_MAX  HEAT_TIME_MILLIS_3 // The highest of the heat times
+#define HEAT_TIME_MILLIS         (24 * 60 * 60 * 1000) // 24 hours - enough for a one-day event
 
 HeatpumpIR *pHeatpumpIR = new PanasonicNKEHeatpumpIR(); // NKE model has 8/10 degrees maintenance with max. fan speed //PanasonicDKEHeatpumpIR();
 
 IRSenderPWM irSender(IR_SENDER_PIN);  // IR led on Arduino, using Arduino PWM
 
-unsigned long lastStateChangeTick = 1;
+unsigned long lastStateChangeTick = 0;
 
 bool togglingHeatMode = false;
 
-int heatInputState = -1;
-int verticalDirInputState = -1;
-int updateInputState = -1;
+int heatInputState        = -1; // Will update input state at startup
+int verticalDirInputState = -1; // Will update input state at startup
 
 unsigned long heatOffMillis = 0; // Heat off
 
@@ -52,21 +37,16 @@ void setup()
   wdt_disable();  /* Disable the watchdog and wait for more than 2 seconds so that the Arduino doesn't keep resetting infinitely in case of wrong configuration */
 
   Serial.begin(9600);
+  Serial.println();
+  Serial.println(F("-------------------------------"));
   Serial.println(F("setup()"));
 
-  pinMode(HEAT_TOGGLE_IN1_PIN,      INPUT_PULLUP);
-  pinMode(HEAT_TOGGLE_IN2_PIN,      INPUT_PULLUP);
-  pinMode(HEAT_TOGGLE_IN3_PIN,      INPUT_PULLUP);
+  pinMode(HEAT_TOGGLE_IN_PIN,      INPUT_PULLUP);
   pinMode(VERTICAL_DIR_INPUT_PIN,   INPUT_PULLUP);
-  pinMode(FORCE_UPDATE_INPUT_PIN,   INPUT_PULLUP);
-  pinMode(TEMP_SELECT_OUT_PIN,      OUTPUT);
-  pinMode(TEMP_SELECT_IN1_PIN,      INPUT_PULLUP);
-  pinMode(TEMP_SELECT_IN2_PIN,      INPUT_PULLUP);
   pinMode(INT_LED_OUTPUT_PIN,       OUTPUT);        
   pinMode(EXT_LED_OUTPUT_PIN,       OUTPUT);        
   digitalWrite(INT_LED_OUTPUT_PIN,  LOW);
   digitalWrite(EXT_LED_OUTPUT_PIN,  LOW);
-  digitalWrite(TEMP_SELECT_OUT_PIN, LOW);
 
   // Because the heat pump may be booting up at the same time,
   // delay the inital IR signalling so allow it to get ready.
@@ -89,16 +69,13 @@ void loop()
 
   delay(UPDATE_INTERVAL_MSEC);
 
-//  // Time to reboot at reqular interval?
-//  if (millis() > REBOOT_INTERVAL_MSEC)
-//  {
-//    // Let the watchdog do the rebooting
-//    while (true);
-//  }
-  
   if (checkUpdatedInputs())
   {
     toggleHeatModeIfRelevant();
+    updateIR();
+  }
+  else if (isHeatTurnOffTime())
+  {
     updateIR();
   }
 }
@@ -106,18 +83,18 @@ void loop()
 bool checkUpdatedInputs()
 {
   // Heat input considered activated (low) if at least one of the heat inputs is low
-  int heatInputVal = ((digitalRead(HEAT_TOGGLE_IN1_PIN) == LOW) || (digitalRead(HEAT_TOGGLE_IN2_PIN) == LOW) || (digitalRead(HEAT_TOGGLE_IN3_PIN) == LOW)) ? LOW : HIGH;
+  int heatInputVal = digitalRead(HEAT_TOGGLE_IN_PIN);
 
   int verticalDirInputVal = digitalRead(VERTICAL_DIR_INPUT_PIN);
-  int updateInputVal = digitalRead(FORCE_UPDATE_INPUT_PIN);
 
   // Just changing input state?
-  if ((heatInputVal != heatInputState) || (verticalDirInputVal != verticalDirInputState) || (updateInputVal != updateInputState))
+  if ((heatInputVal != heatInputState) || (verticalDirInputVal != verticalDirInputState))
   {
+    Serial.println(F("checkUpdatedInputs(): Changing state"));
+
     lastStateChangeTick = millis();
 
     digitalWrite(INT_LED_OUTPUT_PIN, HIGH);
-    digitalWrite(EXT_LED_OUTPUT_PIN, HIGH);
 
     // Don't use the tick value 0 - reserved
     if (lastStateChangeTick == 0)
@@ -128,12 +105,12 @@ bool checkUpdatedInputs()
     {
       // High-to-low, i.e. user pressing the button?
       // If low-to-high we either see end of button press or bounching button
-      togglingHeatMode = (heatInputVal == LOW);
+      if (heatInputVal == LOW)
+        togglingHeatMode = true;
     }
 
     heatInputState = heatInputVal;
     verticalDirInputState = verticalDirInputVal;
-    updateInputState = updateInputVal;
 
     // Not steady yet
   }
@@ -142,11 +119,11 @@ bool checkUpdatedInputs()
     // Still waiting for steadiness
     if (lastStateChangeTick != 0)
     {
-      // Blink external LED by toggling state at each update
-      digitalWrite(EXT_LED_OUTPUT_PIN, (digitalRead(EXT_LED_OUTPUT_PIN) == LOW) ? HIGH : LOW);
-      
-      if (millis() - lastStateChangeTick >= STEADY_INPUT_STATE_MSEC)
+      // Only consider steady if heat button released
+      if ((heatInputVal != LOW) && millis() - lastStateChangeTick >= STEADY_INPUT_STATE_MSEC)
       {
+        Serial.println(F("checkUpdatedInputs(): Steady"));
+
         lastStateChangeTick = 0;
         return true;
       }
@@ -159,24 +136,13 @@ bool checkUpdatedInputs()
 void toggleHeatModeIfRelevant()
 {
     // Not toggling heat mode?
-    if (!togglingHeatMode || (heatInputState == HIGH))
+    if (!togglingHeatMode)
       return;
 
-    if (digitalRead(HEAT_TOGGLE_IN1_PIN) == LOW)
-    {
-      // Toggle heating interval 1
-      heatOffMillis = isHeating() ? 0 : millis() + HEAT_TIME_MILLIS_1;
-    }
-    else if (digitalRead(HEAT_TOGGLE_IN2_PIN) == LOW)
-    {
-      // Toggle heating interval 2
-      heatOffMillis = isHeating() ? 0 : millis() + HEAT_TIME_MILLIS_2;
-    }
-    else if (digitalRead(HEAT_TOGGLE_IN3_PIN) == LOW)
-    {
-      // Toggle heating interval 3
-      heatOffMillis = isHeating() ? 0 : millis() + HEAT_TIME_MILLIS_3;
-    }
+    Serial.println(F("toggleHeatModeIfRelevant(): Heat mode toggle"));
+
+    // Toggle heating interval 1
+    heatOffMillis = isHeating() ? 0 : millis() + HEAT_TIME_MILLIS;
 
     togglingHeatMode = false;
 }
@@ -186,12 +152,12 @@ void updateIR()
   Serial.println(F("updateIR()"));
 
   byte power = isHeating() ? POWER_ON : POWER_OFF;
-  byte temp  = isHeating() ? getTemperatureSetpoint() : 0;
-  byte vertDir = getVerticalDirection();
+  byte temp  = isHeating() ? TEMPERATURE_SETPOINT : 0;
+  byte vertDir = (verticalDirInputState == LOW) ? VDIR_UP : VDIR_DOWN;
 
   Serial.print(F("Power: ")); Serial.println(power);
   Serial.print(F("Temp: ")); Serial.println(temp);
-  Serial.print(F("VertDir: ")); Serial.println(vertDir);
+  Serial.print(F("VertDir: ")); Serial.print(vertDir); Serial.println(getVertDirText(vertDir));
 
   pHeatpumpIR->send(irSender, power, MODE_HEAT, FAN_AUTO, temp, vertDir, HDIR_AUTO);
   pauseIRWhileBlinkingExtLED();
@@ -212,43 +178,40 @@ void pauseIRWhileBlinkingExtLED()
     // Blink external LED by toggling state at each update
     digitalWrite(EXT_LED_OUTPUT_PIN, (digitalRead(EXT_LED_OUTPUT_PIN) == LOW) ? HIGH : LOW);
 
-    delay(UPDATE_INTERVAL_MSEC);
+    wdt_reset(); /* Reset the watchdog */
+    delay(120);
   }  
+}
+
+bool isHeatTurnOffTime()
+{
+  if (isHeating())
+  {
+    unsigned long heatMillisLeft = heatOffMillis - millis();
+
+    // Overflow, i.e. no heating time left
+    if (heatMillisLeft > HEAT_TIME_MILLIS)
+    {
+      heatOffMillis = 0; // Turn off heating
+      return true;
+    }
+  }
+
+  return false;
 }
 
 bool isHeating()
 {
   // Heating?
-  if (heatOffMillis != 0)
-  {
-    unsigned long heatMillisLeft = heatOffMillis - millis();
-
-    // Overflow, i.e. no heating time left
-    if (heatMillisLeft > HEAT_MILLIS_MAX)
-      heatOffMillis = 0; // Turn off heating
-  }
-
-  // Heating?
   return (heatOffMillis != 0);
 }
 
-bool getVerticalDirection()
+String getVertDirText(byte vertDir)
 {
-  return (verticalDirInputState == LOW) ? VDIR_UP : VDIR_DOWN;
-}
-
-byte getTemperatureSetpoint()
-{
-  switch (((digitalRead(TEMP_SELECT_IN2_PIN) == LOW) ? 2 : 0) + ((digitalRead(TEMP_SELECT_IN1_PIN) == LOW) ? 1 : 0))
+  switch (vertDir)
   {
-    case 3:
-      return TEMPERATURE_SETPOINT_3;
-    case 2:
-      return TEMPERATURE_SETPOINT_2;
-    case 1:
-      return TEMPERATURE_SETPOINT_1;
-    case 0:
-    default:
-      return TEMPERATURE_SETPOINT_0;
+    case VDIR_UP: return " (up)";
+    case VDIR_DOWN: return " (down)";
+    default: return " (?)";
   }
 }
