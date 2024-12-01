@@ -17,7 +17,7 @@ Varmepumpen kan enten være:
 Inputs:
 
 * Varmesignal - hvis kortvarigt lavt (forbundet til GND), skiftes mellem slukket og tændt. Indgangen trækkes op til 5 Volt via intern/ekstern pull up-modstand.
-* Vertikal luftretning - hvis dette er lavt (0 Volt), køres høj luftretning, ellers lav luftretning. Indgangen trækkes op til 5 Volt via intern/ekstern pull up-modstand.
+* Vertikal luftretning - hvis dette er lavt (0 Volt), køres lav luftretning, ellers høj luftretning. Indgangen trækkes op til 5 Volt via intern/ekstern pull up-modstand.
 
 Outputs:
 

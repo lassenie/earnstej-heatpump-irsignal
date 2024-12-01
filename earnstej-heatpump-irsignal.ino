@@ -11,19 +11,21 @@
 #define HEAT_TOGGLE_IN_PIN       7
 #define INT_LED_OUTPUT_PIN      13
 
-#define TEMPERATURE_SETPOINT        23
-#define UPDATE_INTERVAL_MSEC      20UL
-#define IR_SIGNAL_PAUSE_BLINKS       3
-#define STEADY_INPUT_STATE_MSEC  100UL // Must be long enough to handle debounching
-#define BOOT_DELAY_SECONDS          10 // Must be at least 2 seconds because of watchdog disabling during startup
+#define TEMPERATURE_SETPOINT              23
+#define UPDATE_INTERVAL_MSEC            20UL
+#define SERIAL_UPDATE_INTERVAL_MSEC  10000UL
+#define IR_SIGNAL_PAUSE_BLINKS             3
+#define STEADY_INPUT_STATE_MSEC        100UL // Must be long enough to handle debounching
+#define BOOT_DELAY_SECONDS                10 // Must be at least 2 seconds because of watchdog disabling during startup
 
-#define HEAT_TIME_MILLIS         (24 * 60 * 60 * 1000) // 24 hours - enough for a one-day event
+#define HEAT_TIME_MILLIS   (24UL * 60UL * 60UL * 1000UL) // 24 hours - enough for a one-day event
 
 HeatpumpIR *pHeatpumpIR = new PanasonicNKEHeatpumpIR(); // NKE model has 8/10 degrees maintenance with max. fan speed //PanasonicDKEHeatpumpIR();
 
 IRSenderPWM irSender(IR_SENDER_PIN);  // IR led on Arduino, using Arduino PWM
 
-unsigned long lastStateChangeTick = 0;
+unsigned long lastStateChangeMillis = 0;
+unsigned long lastSerialUpdateMillis = 0;
 
 bool togglingHeatMode = false;
 
@@ -78,6 +80,43 @@ void loop()
   {
     updateIR();
   }
+  else
+  {
+    updateSerial();
+  }
+}
+
+void updateSerial()
+{
+  if (!isHeating())
+    return;
+
+  unsigned long nowMillis = millis();
+
+  if (nowMillis - lastSerialUpdateMillis > SERIAL_UPDATE_INTERVAL_MSEC)
+  {
+    lastSerialUpdateMillis = nowMillis;
+
+    unsigned long heatSecondsLeft = getHeatMillisLeft() / 1000UL;
+   
+    Serial.print(F("Heat time left: "));
+
+    if (heatSecondsLeft > 60UL * 60UL) // More than an hour left?
+    {
+      Serial.print((int)(heatSecondsLeft / (60UL * 60UL)));
+      Serial.println(F(" hour(s)"));
+    }
+    else if (heatSecondsLeft > 60UL) // More than a minute left?
+    {
+      Serial.print((int)(heatSecondsLeft / 60UL));
+      Serial.println(F(" minute(s)"));
+    }
+    else
+    {
+      Serial.print((int)(heatSecondsLeft));
+      Serial.println(F(" second(s)"));
+    }
+  }
 }
 
 bool checkUpdatedInputs()
@@ -92,13 +131,13 @@ bool checkUpdatedInputs()
   {
     Serial.println(F("checkUpdatedInputs(): Changing state"));
 
-    lastStateChangeTick = millis();
+    lastStateChangeMillis = millis();
 
     digitalWrite(INT_LED_OUTPUT_PIN, HIGH);
 
     // Don't use the tick value 0 - reserved
-    if (lastStateChangeTick == 0)
-      lastStateChangeTick = 1;
+    if (lastStateChangeMillis == 0)
+      lastStateChangeMillis = 1;
 
     // Seeing a change on the heat input?
     if (heatInputVal != heatInputState)
@@ -117,14 +156,14 @@ bool checkUpdatedInputs()
   else // Unchanged input
   {
     // Still waiting for steadiness
-    if (lastStateChangeTick != 0)
+    if (lastStateChangeMillis != 0)
     {
       // Only consider steady if heat button released
-      if ((heatInputVal != LOW) && millis() - lastStateChangeTick >= STEADY_INPUT_STATE_MSEC)
+      if ((heatInputVal != LOW) && millis() - lastStateChangeMillis >= STEADY_INPUT_STATE_MSEC)
       {
         Serial.println(F("checkUpdatedInputs(): Steady"));
 
-        lastStateChangeTick = 0;
+        lastStateChangeMillis = 0;
         return true;
       }
     }
@@ -153,7 +192,7 @@ void updateIR()
 
   byte power = isHeating() ? POWER_ON : POWER_OFF;
   byte temp  = isHeating() ? TEMPERATURE_SETPOINT : 0;
-  byte vertDir = (verticalDirInputState == LOW) ? VDIR_UP : VDIR_DOWN;
+  byte vertDir = (verticalDirInputState == LOW) ? VDIR_DOWN : VDIR_UP;
 
   Serial.print(F("Power: ")); Serial.println(power);
   Serial.print(F("Temp: ")); Serial.println(temp);
@@ -187,10 +226,7 @@ bool isHeatTurnOffTime()
 {
   if (isHeating())
   {
-    unsigned long heatMillisLeft = heatOffMillis - millis();
-
-    // Overflow, i.e. no heating time left
-    if (heatMillisLeft > HEAT_TIME_MILLIS)
+    if (getHeatMillisLeft() == 0)
     {
       heatOffMillis = 0; // Turn off heating
       return true;
@@ -198,6 +234,19 @@ bool isHeatTurnOffTime()
   }
 
   return false;
+}
+
+unsigned long getHeatMillisLeft()
+{
+  unsigned long heatMillisLeft = heatOffMillis - millis();
+
+  // Overflow, i.e. no heating time left
+  if (heatMillisLeft > HEAT_TIME_MILLIS)
+  {
+    heatMillisLeft = 0;
+  }
+
+  return heatMillisLeft;
 }
 
 bool isHeating()
